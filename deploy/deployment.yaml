@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-labelr-webhook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-labelr-webhook
+  template:
+    metadata:
+      labels:
+        app: k8s-labelr-webhook
+    spec:
+      containers:
+        - name: k8s-labelr-webhook
+          image: webhook:v0
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /certs
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: k8s-labelr-webhook-certs
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-labelr-webhook
+spec:
+  ports:
+    - port: 443
+      targetPort: 8080
+  selector:
+    app: k8s-labelr-webhook
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: k8s-labelr-webhook
+webhooks:
+  - name: mutating-webhook.example.com
+    clientConfig:
+      service:
+        name: k8s-labelr-webhook
+        namespace: default
+        path: /mutate
+      caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJkVENDQVJ1Z0F3SUJBZ0lRVk83V0wwc1JkRjB0QW0zZWNCRk5vVEFLQmdncWhrak9QUVFEQWpBUE1RMHcKQ3dZRFZRUUtFd1J1YVd3eE1DQVhEVEkwTURjd09ERTBORFF6TkZvWUR6SXhNalF3TmpFME1UUTBORE0wV2pBUApNUTB3Q3dZRFZRUUtFd1J1YVd3eE1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRVRJaUhod3FQCnJZVWs3MTU5eS9KZUNvd2lLK2pRQ2doWEtxd3JPbGI1WmZidDA2WFpxZVNqRzJqeDRFOTBSdDVSRHR3ekkxZTkKSFAwenBTdGQ5TXFQZzZOWE1GVXdEZ1lEVlIwUEFRSC9CQVFEQWdJRU1CTUdBMVVkSlFRTU1Bb0dDQ3NHQVFVRgpCd01CTUE4R0ExVWRFd0VCL3dRRk1BTUJBZjh3SFFZRFZSME9CQllFRkdmNm9VMXZYYXNtT1d4MGRVNGlkRW9YCnZ4UmtNQW9HQ0NxR1NNNDlCQU1DQTBnQU1FVUNJQXk1eHVWNVVXK1hSOFo2TDhDYzFzbGgzODdFbFJwWjZPeHIKaThBUlhDOStBaUVBZ2NFdWY2d0VwNFFnQTJvZEUxZmYxcjgrKzVldWRzQlJ3TnpnZWNEcEJacz0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods", "configmaps"]
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
