@@ -10,7 +10,6 @@ import (
 	"os"
 
 	admissionv1 "k8s.io/api/admission/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 )
@@ -59,47 +58,73 @@ func mutateObject(w http.ResponseWriter, r *http.Request) {
 	logger.Printf("mutation request for object kind: %s", admissionReviewRequest.Request.Resource.Resource)
 	logger.Printf("using admission review request username, %s, to determine appropriate labels to add to object", admissionReviewRequest.Request.UserInfo.Username)
 
-	rawRequest := admissionReviewRequest.Request.Object.Raw
+	// rawRequest := admissionReviewRequest.Request.Object.Raw
 
 	admissionResponse := &admissionv1.AdmissionResponse{}
-	var patch string
 	patchType := admissionv1.PatchTypeJSONPatch
+	labels := map[string]string{
+		"sea":  "turtle",
+		"land": "mongoose",
+		"air":  "falcon",
+	}
+
+	patch, _ := patchBuilder(labels)
 
 	// todo: handle resources with a pod template spec and patch those labels as well?
-	switch admissionReviewRequest.Request.Resource.Resource {
-	case "pods":
-		pod := corev1.Pod{}
-		if _, _, err := deserializer.Decode(rawRequest, nil, &pod); err != nil {
-			msg := fmt.Sprintf("error decoding raw pod: %v", err)
-			logger.Printf(msg)
-			w.WriteHeader(500)
-			w.Write([]byte(msg))
-			return
-		}
-		if _, ok := pod.Labels["hello"]; !ok {
-			patch = `[{"op":"add","path":"/metadata/labels","value":{"hello":"world"}}]`
-		}
-	case "configmaps":
-		configmap := corev1.ConfigMap{}
-		if _, _, err := deserializer.Decode(rawRequest, nil, &configmap); err != nil {
-			msg := fmt.Sprintf("error decoding raw configmap: %v", err)
-			logger.Printf(msg)
-			w.WriteHeader(500)
-			w.Write([]byte(msg))
-			return
-		}
-		if _, ok := configmap.Labels["hello"]; !ok {
-			patch = `[{"op":"add","path":"/metadata/labels","value":{"hello":"world"}}]`
-		}
-	default:
-		logger.Printf("unhandled resource type: %s\n", admissionReviewRequest.Request.Resource.Resource)
-	}
+	// switch admissionReviewRequest.Request.Resource.Resource {
+	// case "pods":
+	// 	pod := corev1.Pod{}
+	// 	if _, _, err := deserializer.Decode(rawRequest, nil, &pod); err != nil {
+	// 		msg := fmt.Sprintf("error decoding raw pod: %v", err)
+	// 		logger.Printf(msg)
+	// 		w.WriteHeader(500)
+	// 		w.Write([]byte(msg))
+	// 		return
+	// 	}
+	// 	if len(pod.Labels) == 0 {
+	// 		labelsExist := false
+	// 		patch = buildPatch(labelsExist, labels)
+	// 	} else {
+	// 		labelsExist := true
+	// 		patch = buildPatch(labelsExist, labels)
+	// 	}
+	// case "configmaps":
+	// 	configmap := corev1.ConfigMap{}
+	// 	if _, _, err := deserializer.Decode(rawRequest, nil, &configmap); err != nil {
+	// 		msg := fmt.Sprintf("error decoding raw configmap: %v", err)
+	// 		logger.Printf(msg)
+	// 		w.WriteHeader(500)
+	// 		w.Write([]byte(msg))
+	// 		return
+	// 	}
+	// 	if len(configmap.Labels) == 0 {
+	// 		labelsExist := false
+	// 		patch = buildPatch(labelsExist, labels)
+	// 	} else {
+	// 		labelsExist := true
+	// 		patch = buildPatch(labelsExist, labels)
+	// 	}
+	// default:
+	// 	logger.Printf("unhandled resource type: %s\n", admissionReviewRequest.Request.Resource.Resource)
+	// }
+
+	// admissionResponse.Allowed = true
+	// if patch != "" {
+	// 	admissionResponse.PatchType = &patchType
+	// 	admissionResponse.Patch = []byte(patch)
+	// }
+
+	// patchBytes, err := json.Marshal(patch)
+	// if err != nil {
+	// 	http.Error(w, "could not marshal patch bytes", http.StatusInternalServerError)
+	// 	return
+	// }
+
+	// logger.Printf("patching object with following patch string: %s", string(patchBytes))
 
 	admissionResponse.Allowed = true
-	if patch != "" {
-		admissionResponse.PatchType = &patchType
-		admissionResponse.Patch = []byte(patch)
-	}
+	admissionResponse.PatchType = &patchType
+	admissionResponse.Patch = patch
 
 	// Construct the response, which is just another AdmissionReview.
 	var admissionReviewResponse admissionv1.AdmissionReview
