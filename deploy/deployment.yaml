@@ -54,5 +54,9 @@ webhooks:
         apiGroups: [""]
         apiVersions: ["v1"]
         resources: ["pods", "configmaps"]
+      - operations: ["CREATE"]
+        apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        resources: ["deployments"]
     admissionReviewVersions: ["v1"]
     sideEffects: None

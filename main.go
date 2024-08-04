@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -56,93 +57,50 @@ func mutateObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Printf("mutation request for object kind: %s", admissionReviewRequest.Request.Resource.Resource)
-	logger.Printf("using admission review request username, %s, to determine appropriate labels to add to object", admissionReviewRequest.Request.UserInfo.Username)
+	logger.Printf("admission review request username: %s", admissionReviewRequest.Request.UserInfo.Username)
 
-	// rawRequest := admissionReviewRequest.Request.Object.Raw
+	// If the admission review request is coming from a system user (e.g. replicaset controller), we don't want to mutate the object in the request
+	if strings.Contains(admissionReviewRequest.Request.UserInfo.Username, "system") {
+		logger.Printf("ignoring admission review request because it came from a system user: %s", admissionReviewRequest.Request.UserInfo.Username)
+		admissionReviewResponse := passingAdmissionReviewResponse(admissionReviewRequest)
+		resp, err := json.Marshal(admissionReviewResponse)
+		if err != nil {
+			msg := fmt.Sprintf("error marshalling response json: %v", err)
+			logger.Printf(msg)
+			w.WriteHeader(500)
+			w.Write([]byte(msg))
+			return
+		}
 
-	admissionResponse := &admissionv1.AdmissionResponse{}
-	patchType := admissionv1.PatchTypeJSONPatch
-	labels := map[string]string{
-		"sea":  "turtle",
-		"land": "mongoose",
-		"air":  "falcon",
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(resp)
+	} else {
+		// The admission review request must be coming from a non-system user, we do want to mutate the object in the request
+		rawRequest := admissionReviewRequest.Request.Object.Raw
+		k8sObject := GenericK8sObject{}
+		if err := json.Unmarshal(rawRequest, &k8sObject); err != nil {
+			msg := fmt.Sprintf("error unmarshalling raw request object: %v", err)
+			logger.Printf(msg)
+			w.WriteHeader(500)
+			w.Write([]byte(msg))
+			return
+		}
+
+		patch, _ := patchBuilder(k8sObject)
+
+		admissionReviewResponse := patchingAdmissionReviewResponse(admissionReviewRequest, patch)
+		resp, err := json.Marshal(admissionReviewResponse)
+		if err != nil {
+			msg := fmt.Sprintf("error marshalling response json: %v", err)
+			logger.Printf(msg)
+			w.WriteHeader(500)
+			w.Write([]byte(msg))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(resp)
 	}
-
-	patch, _ := patchBuilder(labels)
-
-	// todo: handle resources with a pod template spec and patch those labels as well?
-	// switch admissionReviewRequest.Request.Resource.Resource {
-	// case "pods":
-	// 	pod := corev1.Pod{}
-	// 	if _, _, err := deserializer.Decode(rawRequest, nil, &pod); err != nil {
-	// 		msg := fmt.Sprintf("error decoding raw pod: %v", err)
-	// 		logger.Printf(msg)
-	// 		w.WriteHeader(500)
-	// 		w.Write([]byte(msg))
-	// 		return
-	// 	}
-	// 	if len(pod.Labels) == 0 {
-	// 		labelsExist := false
-	// 		patch = buildPatch(labelsExist, labels)
-	// 	} else {
-	// 		labelsExist := true
-	// 		patch = buildPatch(labelsExist, labels)
-	// 	}
-	// case "configmaps":
-	// 	configmap := corev1.ConfigMap{}
-	// 	if _, _, err := deserializer.Decode(rawRequest, nil, &configmap); err != nil {
-	// 		msg := fmt.Sprintf("error decoding raw configmap: %v", err)
-	// 		logger.Printf(msg)
-	// 		w.WriteHeader(500)
-	// 		w.Write([]byte(msg))
-	// 		return
-	// 	}
-	// 	if len(configmap.Labels) == 0 {
-	// 		labelsExist := false
-	// 		patch = buildPatch(labelsExist, labels)
-	// 	} else {
-	// 		labelsExist := true
-	// 		patch = buildPatch(labelsExist, labels)
-	// 	}
-	// default:
-	// 	logger.Printf("unhandled resource type: %s\n", admissionReviewRequest.Request.Resource.Resource)
-	// }
-
-	// admissionResponse.Allowed = true
-	// if patch != "" {
-	// 	admissionResponse.PatchType = &patchType
-	// 	admissionResponse.Patch = []byte(patch)
-	// }
-
-	// patchBytes, err := json.Marshal(patch)
-	// if err != nil {
-	// 	http.Error(w, "could not marshal patch bytes", http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// logger.Printf("patching object with following patch string: %s", string(patchBytes))
-
-	admissionResponse.Allowed = true
-	admissionResponse.PatchType = &patchType
-	admissionResponse.Patch = patch
-
-	// Construct the response, which is just another AdmissionReview.
-	var admissionReviewResponse admissionv1.AdmissionReview
-	admissionReviewResponse.Response = admissionResponse
-	admissionReviewResponse.SetGroupVersionKind(admissionReviewRequest.GroupVersionKind())
-	admissionReviewResponse.Response.UID = admissionReviewRequest.Request.UID
-
-	resp, err := json.Marshal(admissionReviewResponse)
-	if err != nil {
-		msg := fmt.Sprintf("error marshalling response json: %v", err)
-		logger.Printf(msg)
-		w.WriteHeader(500)
-		w.Write([]byte(msg))
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(resp)
 }
 
 func admissionReviewFromRequest(r *http.Request, deserializer runtime.Decoder) (*admissionv1.AdmissionReview, error) {
